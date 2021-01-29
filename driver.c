@@ -90,7 +90,7 @@ int parseArgs(char input[], char *args[]) {
 }
 
 // Handles built-in commands
-void builtInCommand(char *args[], int numArgs) {
+void builtInCommand(char *args[], int numArgs, char *status) {
     if(!strcmp(args[0], "cd")) {
         if(numArgs == 1) {
             chdir(getenv("HOME"));
@@ -98,17 +98,78 @@ void builtInCommand(char *args[], int numArgs) {
             chdir(args[1]);
         }
     } else if (!strcmp(args[0], "status")) {
-
+        printf("%s\n", status);
+        fflush(stdout);
     } else if (!strcmp(args[0], "exit")) {
         exit(0);
     }
 }
 
-void otherCommands() {
-    // int i = 1;
-    // while(i < numArgs && strcmp(args[i], "&")) {
-    //     i++;
-    // }
+// Runs command in foreground
+void foregroundCommand(char *args[], char *status, int numArgs) {
+    // Fork off child
+    pid_t spawnPid = fork();
+
+    // Error forking child
+    if(spawnPid == -1) {
+        perror("source fork()");
+        exit(1);
+    // In child
+    } else if (spawnPid == 0) {
+        int i = 0;
+        char *newArgs[numArgs];
+        // Find main command and arguments
+        while(i < numArgs) {
+            // If find stdin/stdout or & operator, args finished
+            if(strcmp(args[i], "<") && strcmp(args[i], ">") && (strcmp(args[i], "&") && numArgs == i-1)) {
+                break;
+            }
+            newArgs[i] = args[i];
+            i++;
+        }
+        newArgs[i] = NULL;
+
+        // Redirect stdin/stdout
+        while(i < numArgs) {
+            if(!strcmp(args[i], "<")) {
+                int sourceFD = open(args[i+1], O_RDONLY);
+                if(sourceFD == -1) {
+                    perror("source open()");
+                    exit(1);
+                }
+                int result = dup2(sourceFD, 0);
+                if (result == -1) {
+                    perror("source dup2()");
+                    exit(1);
+                }
+                i++;
+            } else if (!strcmp(args[i], ">")) {
+                int targetFD = open(args[i+1], O_WRONLY);
+                if(targetFD == -1) {
+                    perror("source open()");
+                    exit(1);
+                }
+                int result = dup2(targetFD, 1);
+                if (result == -1) {
+                    perror("source dup2()");
+                    exit(1);
+                }
+                i++;
+            }
+            // Skip over next arg since it is the input/output file
+            i++;
+        }
+        execvp(newArgs[0], newArgs);
+        perror("source execvp()");
+        exit(1);
+    } else {
+
+    }
+}
+
+// Runs command in background
+void backgroundCommand(char *args[], char *status) {
+
 }
 
 int main() {
@@ -121,19 +182,22 @@ int main() {
         fflush(stdout);
         fgets(input, 2048, stdin);
         input[strlen(input)-1] = '\0';
+        char *status = "exit value 0";
         // If line isn't comment, execute it
         if(input[0] != '#') {
             expandVariable(input);
             int numArgs = parseArgs(input, args);
+            // If at least one argument, run command
             if(numArgs != 0) {
                 if(!strcmp("exit", args[0]) || !strcmp("cd", args[0]) || !strcmp("status", args[0])) {
-                    builtInCommand(args, numArgs);
-                } else if (numArgs != 0) {
-                    execlp("ls", "ls", NULL);
+                    builtInCommand(args, numArgs, status);
+                } else if (!strcmp("&", args[numArgs-1])) {
+                    // backgroundCommand(args, status);
+                } else {
+                    foregroundCommand(args, status, numArgs);
                 }
             }
         }
     }
-
     return 0;
 }
